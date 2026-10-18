@@ -80,8 +80,13 @@ regression as layer 1 is explicitly forbidden (caps at 5-6 deg).
 - Code and comments in English. CLI/console text in English.
 - NO emojis anywhere: not in UI, CLI output, logs, README, commit messages or
   any future executable/web interface. All visual interfaces must look
-  professional and sober: clean typography, neutral palette (dark gray panels,
-  off-white text), no playful decorations or childish tones.
+  professional and sober: clean typography, neutral palette, no playful
+  decorations or childish tones.
+- LIGHT THEME BY DEFAULT for every interface (permanent, all projects): light
+  ground, sober neutral palette on light, good text contrast. Dark mode only
+  when the user explicitly asks for it. Applies to the web dashboard, the Qt
+  panels, and anything future. (Chart/heatmap scales must read on light:
+  greens over white, and "no data" clearly distinct from "zero".)
 - Angle conventions are documented in `gaze/mediapipe_head.py` and
   `gaze/eth_xgaze.py` docstrings; keep new code consistent with them
   (yaw positive = subject's right, pitch positive = up, "left/right" always
@@ -131,6 +136,51 @@ flag; no emojis anywhere.
     `cv2.VideoCapture` blocks for tens of seconds on the next open - the logger
     correctly records camera_lost meanwhile.
   - Deps added: psutil 6.0.0.
+- **2B.1 done** - event snapshots. `overlay/event_detector.py` consumes the
+  logger's per-interval stream (signal `intervalLogged`) and emits
+  OFF_SCREEN_SUSTAINED / FACE_ABSENT / DISTRACTION_RETURN / FOCUS_BLOCK_START
+  when sustained patterns cross configurable thresholds; a camera_lost
+  interval resets all streaks. Events are ALWAYS written to `events(ts,
+  session_id, event_type, snapshot_path, duration_s)` (valuable metrics). The
+  face IMAGE is opt-in (off by default, "Capturas" panel section / `--snapshots`),
+  reuses the worker's last already-captured frame (zero extra camera cost),
+  saved to data/snapshots/YYYY-MM-DD/. Retention (default 14 d) runs on
+  recorder start: old snapshot folders deleted, their event snapshot_path
+  NULLed (metric row kept). Images never leave the machine.
+- **2C done (analytical views)** - Laravel 12 + Inertia + React/TS/Tailwind in
+  `dashboard/`. Localhost-only (LocalOnly middleware + `php artisan serve`);
+  NEVER a VPS (face + behavior data). Read-only direct SQLite to
+  `../data/activity.db` (WAL -> concurrent readers alongside the Python writer;
+  `ActivityMetrics` runs `PRAGMA query_only=ON`). autoskills installed the
+  stack skills; flagged `php-pro` removed. Do NOT touch PROJECT.md (claude.ai).
+  Build `npm run build`, serve `php artisan serve`.
+  - **Timestamps are UTC** (Z suffix) from the recorder (`activity_db._now_iso`);
+    the dashboard converts to `America/Guayaquil` for BOTH display and
+    grouping (`ActivityMetrics::localOffset` from `config('app.timezone')`;
+    SQLite parses the Z + a bound `%+d minutes` modifier applied inside every
+    `strftime` BEFORE any hour/day GROUP BY). Laravel 12 hardcoded
+    `config/app.php` timezone to 'UTC', which silently grouped the heatmap in
+    UTC (a fixed 5 h shift); fixed to `env('APP_TIMEZONE', 'America/Guayaquil')`.
+    Every time-grouping/display method uses `localOffset()`: heatmap,
+    availableDays, dayTimeline, sessions, presenceGaps. One-shot migration of
+    pre-UTC rows: `tools/migrate_ts_utc.py` (+5 h, idempotent; ran; backup at
+    `data/activity.db.pre-utc.bak`).
+  - Views: Resumen (5 tables), Heatmap (weekday x hour, intensity = productive
+    = present+active+process categorized 'trabajo'; empty cells honest, no
+    interpolation), Timeline (day picker, process bands + presence gaps +
+    events with opt-in snapshot via guarded `/snapshot`), Atencion (6x3 gaze
+    grid + on/off + apps by category, Recharts), Sesiones, Configuracion.
+  - **Categorization** (`process_categories` in the dashboard's OWN
+    database.sqlite - the ONLY write; activity.db stays read-only) via
+    `ProcessCategory`; editable from the Config page (`POST /config/category`).
+    Seeded editable defaults; unseen processes = 'sin_categorizar'. Verified
+    end-to-end against the real ~90 min session (all views render real data;
+    write goes to the dashboard DB, not activity.db).
+- **2C alarm (minimal)** - sober Windows toast (`QSystemTrayIcon.showMessage`)
+  after sustained off-screen time; `config.alarm_enabled/off_screen_min`, the
+  "Alarmas" panel section, `--alarm` / `--alarm-off-screen-min`. A second
+  consumer of the logger's interval stream in `OverlayApp._on_alarm_interval`.
+  Distraction-app alarm needs the dashboard categories -> documented follow-up.
 
 - **2A done** - `python main.py overlay`. Transparent, click-through,
   always-on-top gaze cursor over real apps (`overlay/gaze_overlay.py`). It is
@@ -175,6 +225,49 @@ flag; no emojis anywhere.
     windows are higher integrity and draw OVER the overlay (documented, not a
     bug).
   - Deps added: PyQt6 6.7.1, pywin32 306, pynput 1.7.7.
+
+## Post-Phase-2 usability + gaze->window mapping (done)
+
+- **Easy start** - `gazetrack.bat` (root): `cd /d %~dp0` + `.venv\Scripts\
+  python.exe main.py record --background %*` (double-click; extra flags pass
+  through). `start_dashboard.bat`: builds if `public/build/manifest.json` is
+  missing, then `php artisan serve` (php from PATH else `C:\xampp\php\php.exe`)
+  and opens 127.0.0.1:8000. `python main.py autostart --enable/--disable/
+  --status` (`cmd_autostart`) manages a Windows logon Scheduled Task via
+  schtasks. Exact register command:
+  `schtasks /Create /TN "gazetrack recorder" /TR "\"<venv>\pythonw.exe\"
+  \"<root>\main.py\" record --background" /SC ONLOGON /RL LIMITED /F`
+  (pythonw = hidden, no console; tray is the runtime control). schtasks
+  /Create needs a full interactive token; on systems that require it, run from
+  an elevated prompt - cmd_autostart detects "Access denied"/"Acceso denegado"
+  and says so. main.py is CWD-independent (paths from `__file__`), so the task
+  runs from any working dir.
+- **Gaze -> window mapping** - WHICH window the user is LOOKING at, not just
+  the active one. Schema **v2** (`activity_db.SCHEMA_VERSION`, PRAGMA
+  user_version): two new `samples` columns `gazed_process` /
+  `gazed_window_title`. Migration is additive (`ActivityDB._migrate` ALTERs an
+  existing table; old rows read back NULL) - fresh DBs get them in the CREATE.
+  - Resolution (`activity_logger`): per on-screen frame with
+    `tracking_state==ok`, `_window_under(x,y)` = `WindowFromPoint` (honours
+    z-order, skips hidden/disabled/transparent windows) + `GetAncestor GA_ROOT`
+    (child control -> top-level). Chosen over EnumWindows z-order walking: O(1)
+    two win32 calls, and the OS already does the hit-test. The overlay is
+    click-through (WS_EX_TRANSPARENT) so WindowFromPoint skips it; its HWND is
+    ALSO excluded explicitly (`set_exclude_hwnd`, wired in `OverlayApp.run`
+    after the window has a native handle). Cost is trivial: one hit-test per
+    frame; the psutil/title resolve runs ONCE per interval on the modal HWND.
+  - Semantics: interval MODE of the looked-at window; NULL when off-screen or
+    not tracking. `gazed_window_title` respects `--no-titles` exactly like the
+    active title.
+  - Dashboard (read-only, guarded by `ActivityMetrics.hasGazedColumn` so a
+    pre-v2 DB degrades to empty instead of erroring): Atencion gains "apps
+    miradas vs apps activas" (grouped bars: active=foreground vs gazed=looked;
+    the gap is the new focus-vs-attention metric), a foco-vs-mirada alignment
+    bar (`gazeFocusAlignment`), and a divergence table (`gazedVsActive`);
+    Resumen adds "Tiempo por aplicacion mirada" (`timePerGazedApp`). New
+    `SAMPLE_QUERIES`: `time_per_gazed_app`, `gazed_vs_active`. Existing session
+    data has NULL gazed columns (mapping added after those sessions); the views
+    show an honest empty state until the next recorded session populates them.
 
 ## PHASE-01B precision iteration (in progress)
 

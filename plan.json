@@ -1,0 +1,530 @@
+{
+  "$schema": "../plan-vivo/schema/plan.schema.json",
+  "schema_version": 1,
+  "project": "gazetrack",
+  "title": "gazetrack — mirada en webcam y productividad",
+  "updated_at": "2026-10-18T14:45:00-05:00",
+  "phases": [
+    {
+      "id": "F1",
+      "name": "Fase 1 — Gaze MVP",
+      "items": [
+        {
+          "id": "P1",
+          "type": "prompt",
+          "title": "Investigacion de viabilidad y spec de Fase 1",
+          "status": "done",
+          "estimate_min": [30, 60],
+          "difficulty": 5,
+          "work_log": [
+            { "actor": "orchestrator", "start": "2026-07-05T15:20:00-05:00", "end": "2026-07-05T16:06:55-05:00", "note": "analisis de hipotesis + eleccion ETH-XGaze + PHASE-01 spec", "manual": true }
+          ],
+          "summary": "Redefinicion del MVP a gaze estilo Tobii; ETH-XGaze elegido; PHASE-01-gaze-mvp.md escrito.",
+          "steps": ["Viabilidad de la hipotesis de productividad", "Comparacion L2CS vs ETH-XGaze", "Spec y orden a->i con puerta tras (d)"],
+          "files_changed": 1,
+          "notes": "Historial reconstruido: las sesiones de Claude Code de julio no se conservaron; los tramos de esta y las demas fases de julio se derivan de los timestamps de archivos y de los commits (marcados manual), por lo que la duracion es aproximada. Fuente de la cronologia: PROJECT.md."
+        },
+        {
+          "id": "P2",
+          "type": "prompt",
+          "title": "Etapas a-d: camara, CUDA, MediaPipe, wrapper ETH-XGaze",
+          "status": "done",
+          "estimate_min": [150, 240],
+          "difficulty": 6,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T16:36:33-05:00", "end": "2026-07-05T18:42:32-05:00", "note": "real aprox. de mtimes (dot.py, eth_xgaze.py)", "manual": true }
+          ],
+          "summary": "Captura verificada, CUDA (RTX 4090), head pose MediaPipe, inferencia ETH-XGaze 3.8 ms/frame.",
+          "steps": ["Camara con verificacion de resolucion real", "check_env CUDA", "MediaPipe head pose (PnP)", "Wrapper ETH-XGaze CUDA"],
+          "files_changed": 8,
+          "notes": "Detenido en la puerta tras (d) segun el prompt de arranque."
+        },
+        {
+          "id": "U1",
+          "type": "unplanned",
+          "title": "autoskills interpretado como crear skills a mano",
+          "status": "done",
+          "estimate_min": null,
+          "difficulty": 2,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T18:42:32-05:00", "end": "2026-07-05T18:54:00-05:00", "note": "correccion: npx autoskills real", "manual": true }
+          ],
+          "summary": "Se ejecuto npx autoskills (6 skills detectadas desde requirements.txt) en vez del CLAUDE.md manual.",
+          "steps": ["npx autoskills --dry-run", "Instalacion con -a claude-code", "Verificacion en disco"],
+          "files_changed": 0,
+          "notes": "Aparecio al revisar el setup de Fase 1 (PROJECT.md seccion 6)."
+        },
+        {
+          "id": "U2",
+          "type": "unplanned",
+          "title": "Eliminar skill python-executor (warning de seguridad)",
+          "status": "done",
+          "estimate_min": null,
+          "difficulty": 2,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T18:54:00-05:00", "end": "2026-07-05T19:03:00-05:00", "note": "quitar symlink + origen", "manual": true }
+          ],
+          "summary": "python-executor eliminada (ejecucion remota, Bash amplio); contradice el diseno 100% local.",
+          "steps": ["Quitar de .agents/skills y .claude/skills", "Verificar con listado de ambos directorios"],
+          "files_changed": 0,
+          "notes": "Decision del usuario; verificado sin rastro."
+        },
+        {
+          "id": "U3",
+          "type": "unplanned",
+          "title": "Fix de camara: foco manual, fps y rayo de gaze visible",
+          "status": "done",
+          "estimate_min": null,
+          "difficulty": 5,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T19:20:00-05:00", "end": "2026-07-05T19:55:00-05:00", "note": "focus-sweep, propiedades runtime, rayo 2D", "manual": true }
+          ],
+          "summary": "focus-sweep interactivo, impresion de props reales, rayo 2D con ganancia fija y HUD.",
+          "steps": ["--focus-sweep con metrica de nitidez", "verify() con diagnostico si fps<15", "Rayo 2D + barras HUD"],
+          "files_changed": 3,
+          "notes": "Prueba en vivo del usuario revelo imagen desenfocada, 5.5 fps y rayo invisible."
+        },
+        {
+          "id": "U4",
+          "type": "unplanned",
+          "title": "Causa raiz 5.5 fps: c922 en indice 1, MSMF-first",
+          "status": "done",
+          "estimate_min": null,
+          "difficulty": 7,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T19:55:00-05:00", "end": "2026-07-05T20:05:00-05:00", "note": "MSMF-first; indice 1 persistido", "manual": true, "commits": ["66ade8f"] }
+          ],
+          "summary": "La c922 (indice 1) bajo DSHOW caia en YUY2@5fps; MSMF-first negocia MJPEG@1080p30 (29.8 fps).",
+          "steps": ["Identificar hardware real (c922, no C920)", "MSMF primario / DSHOW fallback", "camera.yaml indice 1", "Advertencias en CLAUDE.md"],
+          "files_changed": 2,
+          "notes": "Leccion: verificar la identidad del hardware; los smoke tests corrian sobre la webcam integrada (indice 0). Commit 66ade8f 'create setup'."
+        },
+        {
+          "id": "P3",
+          "type": "prompt",
+          "title": "Etapas e-i: calibrador 33 targets, poly2/Ridge, One-Euro, eval, CLI",
+          "status": "done",
+          "estimate_min": [180, 300],
+          "difficulty": 7,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T20:05:00-05:00", "end": "2026-07-05T21:30:00-05:00", "note": "real aprox. de mtimes (eval/grid, calibrator)", "manual": true }
+          ],
+          "summary": "Calibrador grid 5x5 + extras, PolynomialFeatures(2)+Ridge con pesos, One-Euro, eval honesto, CLI completo.",
+          "steps": ["33 targets con rechazo MAD", "StandardScaler->Poly2->Ridge", "One-Euro (jitter 13.5->6.3 px)", "eval px/cm/grados + YAML", "CLI calibrate/demo/record/evaluate"],
+          "files_changed": 7,
+          "notes": "Capa 2 recibe un sample_provider; nunca ve frames ni el modelo."
+        },
+        {
+          "id": "U5",
+          "type": "unplanned",
+          "title": "Fix PnP: gaze respondia solo a la cabeza (modelo mm + SQPNP)",
+          "status": "done",
+          "estimate_min": null,
+          "difficulty": 8,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T21:30:00-05:00", "end": "2026-07-05T22:00:00-05:00", "note": "modelo antropometrico real + SQPNP", "manual": true }
+          ],
+          "summary": "El modelo PnP generico (~3.3x) magnificaba el crop y recortaba los ojos; modelo en mm reales + SOLVEPNP_SQPNP.",
+          "steps": ["Diagnostico por niveles (patch/crudo/des-norm)", "_PNP_MODEL_POINTS en mm reales", "SQPNP contra rama espejo", "Canario de distancia PnP"],
+          "files_changed": 2,
+          "notes": "Verificado en vivo: gaze responde a ojos (yaw +43.5 a -37.5). Advertencias en CLAUDE.md contra revertir."
+        },
+        {
+          "id": "P4",
+          "type": "prompt",
+          "title": "Geometria de pantalla persistente + diagnosticos de calibracion + protocolo natural",
+          "status": "done",
+          "estimate_min": [90, 150],
+          "difficulty": 6,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T22:00:00-05:00", "end": "2026-07-05T22:40:00-05:00", "note": "screen.yaml + diagnosticos + % ancho", "manual": true }
+          ],
+          "summary": "screen.yaml (sin default silencioso), residual por target, rango head pose, protocolo natural, error en % del ancho.",
+          "steps": ["Subcomando screen + screen.yaml", "Diagnosticos por target (MOVED/HIGH-RESIDUAL)", "Autodeteccion DPI (3840x1080)", "Protocolo natural cabeza+ojos"],
+          "files_changed": 3,
+          "notes": "Contexto 49\" ultrawide (119.8x33.7 cm): los defaults de cm hacian invalidos cm/grados."
+        },
+        {
+          "id": "U6",
+          "type": "unplanned",
+          "title": "Fix de sobreajuste capa 2 (quitar face_x/y/z, alpha LOOCV)",
+          "status": "done",
+          "estimate_min": null,
+          "difficulty": 7,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T22:40:00-05:00", "end": "2026-07-05T23:20:00-05:00", "note": "4 inputs, LOOCV, guardrail, FEATURE_VERSION=2", "manual": true }
+          ],
+          "summary": "7 features/33 muestras sobreajustaban (evaluate 22x LOOCV); vector 4D (14 terminos), alpha por LOOCV, guardrail de ratio.",
+          "steps": ["Quitar face_x/y/z", "RidgeCV LOOCV explicito", "Guardrail features/muestras >0.5", "FEATURE_VERSION=2 rechaza v1"],
+          "files_changed": 2,
+          "notes": "Diagnostico con evidencia dura; descarto serializacion (roundtrip 0 px)."
+        },
+        {
+          "id": "G1",
+          "type": "gate",
+          "title": "Puerta Fase 1: linea base real",
+          "status": "done",
+          "estimate_min": [10, 20],
+          "difficulty": 3,
+          "work_log": [],
+          "summary": "Linea base 246.2 px (6.41% del ancho, ~5.85 deg), evaluate ~= LOOCV. Fase 1 cerrada.",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Aprobada por el usuario en vivo; sin registro de duracion de la revision. Decidio iterar precision (Fase 1B) antes de Fase 2."
+        }
+      ]
+    },
+    {
+      "id": "F2",
+      "name": "Fase 1B — Smooth pursuit (precision)",
+      "items": [
+        {
+          "id": "P5",
+          "type": "prompt",
+          "title": "(a) grid regional 3x3 en evaluate + (b) coleccion de pursuit",
+          "status": "done",
+          "estimate_min": [90, 150],
+          "difficulty": 7,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-05T23:20:00-05:00", "end": "2026-07-06T00:15:00-05:00", "note": "grid 3x3 + mapping/pursuit.py", "manual": true }
+          ],
+          "summary": "eval con grid 3x3 (flag >1.5x mediana) y colector de pursuit (serpentina 350 px/s, filtrado blink/sacada/re-enganche, lag por CV).",
+          "steps": ["grid 3x3 con flag regional", "Trayectoria serpentina+perimetro+diagonales", "Filtrado por causa (~8% descarte)", "Stream a pursuit_*.csv"],
+          "files_changed": 3,
+          "notes": "Interleaved con el cierre de Fase 1. Detenido en la puerta de prerrequisitos fisicos."
+        },
+        {
+          "id": "G2",
+          "type": "gate",
+          "title": "Puerta: coleccion de pursuit del usuario",
+          "status": "done",
+          "estimate_min": [20, 40],
+          "difficulty": 3,
+          "work_log": [],
+          "summary": "Usuario corrio --pursuit: 2790 muestras, descarte 8.4%, block-CV solo-pursuit 126.8 px (ya la mitad de la linea base).",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Corrida fisica del usuario con la camara centrada; sin registro de duracion. Bandera: lag clavado en el tope del grid."
+        },
+        {
+          "id": "P6",
+          "type": "prompt",
+          "title": "(c)+(d) sesion combinada grid+pursuit, lag por block-CV, FEATURE_VERSION=3",
+          "status": "done",
+          "estimate_min": [120, 180],
+          "difficulty": 8,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T00:15:00-05:00", "end": "2026-07-06T01:40:00-05:00", "note": "sesion combinada + seleccion grado/alpha por block-CV", "manual": true, "commits": ["960002c"] }
+          ],
+          "summary": "Grid fresco + pursuit en una corrida, lag 0-450 ms por block-CV (optimo 250 ms), grado 2 elegido sobre 3, FEATURE_VERSION=3.",
+          "steps": ["--pursuit-csv con sidecar .meta.yaml", "Block-CV combinado con anclajes discretos", "Extension del grid de lag a 0-450", "Residual regional 3x3 en calibrate"],
+          "files_changed": 4,
+          "notes": "Commit 960002c 'mvp created' agrupa Fase 1 + 1B."
+        },
+        {
+          "id": "G3",
+          "type": "gate",
+          "title": "Puerta final Fase 1B",
+          "status": "done",
+          "estimate_min": [10, 20],
+          "difficulty": 3,
+          "work_log": [],
+          "summary": "1B cerrada como exito: 166.9 px global (4.35%), centro 105 px / 2.51 deg (meta original cumplida), degradacion derecha eliminada.",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Aprobada por el usuario; esquina superior izquierda anotada como limitacion conocida. Sin registro de duracion."
+        }
+      ]
+    },
+    {
+      "id": "F3",
+      "name": "Fase 2A — Overlay transparente",
+      "items": [
+        {
+          "id": "P7",
+          "type": "prompt",
+          "title": "Overlay PyQt6 click-through, cursor, fade adaptativo, hotkeys, tray",
+          "status": "done",
+          "estimate_min": [180, 300],
+          "difficulty": 8,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T01:40:00-05:00", "end": "2026-07-06T02:50:00-05:00", "note": "real aprox.; mtimes de 2A reescritos por ediciones transversales posteriores", "manual": true }
+          ],
+          "summary": "Overlay transparente/click-through/topmost (PyQt6 + win32 NOACTIVATE), cursor parametrizable, fade por pose extrema, hotkeys, tray.",
+          "steps": ["WS_EX_LAYERED|TRANSPARENT|TOPMOST|NOACTIVATE", "Repintado por region sucia", "Fade leyendo rango head pose de la calibracion", "pynput GlobalHotKeys -> senal Qt", "QThread para el pipeline"],
+          "files_changed": 4,
+          "notes": "Consumidor del pipeline (reusa sample/mapper/smoother); capas 1/2 intactas salvo metadato head_range. Consumo honesto: ~1.7 cores, GPU ~20%."
+        },
+        {
+          "id": "G4",
+          "type": "gate",
+          "title": "Puerta 2A: overlay sobre apps reales",
+          "status": "done",
+          "estimate_min": [15, 30],
+          "difficulty": 3,
+          "work_log": [],
+          "summary": "Aprobado por el usuario ('no es exacto pero se ve genial', consistente con ~3 cm de precision en centro).",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Sin registro de duracion de la prueba del usuario."
+        }
+      ]
+    },
+    {
+      "id": "F4",
+      "name": "Fase 2A.1 — Panel de configuracion",
+      "items": [
+        {
+          "id": "P8",
+          "type": "prompt",
+          "title": "Panel Qt de ajustes con cambios en vivo y persistencia",
+          "status": "done",
+          "estimate_min": [90, 150],
+          "difficulty": 6,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T02:50:00-05:00", "end": "2026-07-06T04:05:00-05:00", "note": "overlay/config.py + settings_dialog.py", "manual": true }
+          ],
+          "summary": "Dialogo Qt desde tray/Ctrl+Alt+S, cambios en vivo (setters, sin tocar pipeline), persistencia data/overlay.yaml con debounce, restaurar defaults.",
+          "steps": ["Secciones cursor/suavizado/fade/hotkeys", "apply_config en vivo", "Precedencia flag>yaml>default", "Debounce 400 ms"],
+          "files_changed": 3,
+          "notes": "Estructura preparada para crecer con secciones de 2B/2C."
+        },
+        {
+          "id": "U7",
+          "type": "unplanned",
+          "title": "Bug de cierre: pynput.stop/QThread.wait cuelgan (app.quit + os._exit)",
+          "status": "done",
+          "estimate_min": null,
+          "difficulty": 6,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T04:05:00-05:00", "end": "2026-07-06T04:25:00-05:00", "note": "patron app.quit()+os._exit()", "manual": true }
+          ],
+          "summary": "pynput.stop() cuelga desde otro hilo en Windows y QThread.wait ignoraba el timeout; solucion app.quit() tras exec() + os._exit().",
+          "steps": ["Diagnostico del cuelgue", "app.quit() rompe exec()", "os._exit() salta el desenrollado de hilos nativos"],
+          "files_changed": 1,
+          "notes": "Cazado por el agente durante 2A.1; documentado en CLAUDE.md."
+        },
+        {
+          "id": "G5",
+          "type": "gate",
+          "title": "Puerta 2A.1",
+          "status": "done",
+          "estimate_min": [10, 20],
+          "difficulty": 3,
+          "work_log": [],
+          "summary": "Panel aprobado por el usuario.",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Sin registro de duracion."
+        }
+      ]
+    },
+    {
+      "id": "F5",
+      "name": "Fase 2B — Registro de actividad",
+      "items": [
+        {
+          "id": "P9",
+          "type": "prompt",
+          "title": "record --background: SQLite WAL + logger + robustez de camara",
+          "status": "done",
+          "estimate_min": [150, 240],
+          "difficulty": 7,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T04:25:00-05:00", "end": "2026-07-06T05:20:00-05:00", "note": "activity_db + activity_logger; mtimes finales reescritos por mejoras", "manual": true }
+          ],
+          "summary": "Registro en segundo plano a activity.db (SQLite WAL, commit por intervalo), gaze por zonas 6x3 + presencia + ventana (--no-titles) + conteos teclado/mouse, camera_lost con backoff.",
+          "steps": ["SQLite WAL, transaccion por intervalo", "Logger 5 s (zona/presencia/proceso modal, conteos)", "PRIVACIDAD: conteos, nunca contenido de teclas", "camera_lost + recovery de sesiones huerfanas", "5 consultas SQL de muestra"],
+          "files_changed": 3,
+          "notes": "~1.8 MB/dia medido. os._exit pierde maximo el intervalo en curso."
+        },
+        {
+          "id": "G6",
+          "type": "gate",
+          "title": "Puerta 2B: sesion real + revision de activity.db",
+          "status": "done",
+          "estimate_min": [30, 60],
+          "difficulty": 3,
+          "work_log": [],
+          "summary": "Puerta cerrada: sesion real del usuario (~93% on-screen) revisada contra las consultas SQL; abrio 2C.",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Sesion real del usuario (>=1 h); el trabajo paralelo del agente (2B.1 + fundacion 2C) corrio durante esta puerta. Sin registro de duracion."
+        }
+      ]
+    },
+    {
+      "id": "F6",
+      "name": "Fase 2B.1 — Snapshots por evento",
+      "items": [
+        {
+          "id": "P10",
+          "type": "prompt",
+          "title": "Detector de eventos + snapshots opt-in + retencion",
+          "status": "done",
+          "estimate_min": [90, 150],
+          "difficulty": 6,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T01:42:00-05:00", "end": "2026-07-06T02:15:00-05:00", "note": "event_detector.py (trabajo paralelo a la puerta 2B)", "manual": true }
+          ],
+          "summary": "event_detector sobre el stream de intervalos (OFF_SCREEN_SUSTAINED, FACE_ABSENT, DISTRACTION_RETURN, FOCUS_BLOCK_START); eventos siempre, imagen JPEG opt-in con retencion 14 d.",
+          "steps": ["Deteccion por patrones sostenidos", "Tabla events siempre escrita", "Snapshot opt-in reusando el ultimo frame", "Retencion configurable al arrancar"],
+          "files_changed": 2,
+          "notes": "Trabajo paralelo autorizado mientras el usuario corria la puerta 2B. Las imagenes nunca salen de la maquina."
+        }
+      ]
+    },
+    {
+      "id": "F7",
+      "name": "Fase 2C — Dashboard analitico",
+      "items": [
+        {
+          "id": "P11",
+          "type": "prompt",
+          "title": "Fundacion Laravel 12 + Inertia + React (localhost, read-only)",
+          "status": "done",
+          "estimate_min": [90, 150],
+          "difficulty": 6,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T02:15:00-05:00", "end": "2026-07-06T02:55:00-05:00", "note": "esqueleto dashboard/ (composer.json, scaffolding)", "manual": true }
+          ],
+          "summary": "Esqueleto Laravel 12 + Inertia + React/TS/Tailwind en dashboard/, solo localhost (LocalOnly), SQLite read-only a ../data/activity.db, endpoints espejo de las 5 consultas.",
+          "steps": ["Scaffolding Laravel + Inertia + React", "Middleware LocalOnly (403 fuera de 127.0.0.1)", "Conexion read-only WAL (query_only=ON)", "Endpoints JSON y shell de navegacion"],
+          "files_changed": 40,
+          "notes": "Trabajo paralelo (bloque 2) autorizado durante la puerta 2B. Vistas ricas detras de la puerta de validacion de datos."
+        },
+        {
+          "id": "P12",
+          "type": "prompt",
+          "title": "Vistas analiticas (heatmap, timeline, atencion, sesiones, categorizacion)",
+          "status": "done",
+          "estimate_min": [180, 300],
+          "difficulty": 7,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T04:55:00-05:00", "end": "2026-07-06T05:35:00-05:00", "note": "ActivityMetrics + paginas React; mtimes finales por tema claro", "manual": true }
+          ],
+          "summary": "Heatmap de horas productivas (vista central), linea de tiempo con bandas y eventos, distribucion de atencion, sesiones, categorizacion editable (unica escritura, en la DB del dashboard).",
+          "steps": ["ActivityMetrics (agregados con offset local)", "Heatmap/Timeline/Atencion/Sesiones (Recharts)", "ProcessCategory editable en database.sqlite del dashboard", "Snapshots por evento incrustados (guardado /snapshot)"],
+          "files_changed": 25,
+          "notes": "activity.db siempre read-only; la unica escritura va a la DB propia del dashboard."
+        },
+        {
+          "id": "U8",
+          "type": "unplanned",
+          "title": "Bug de agrupacion en UTC (timezone) + auditoria de vistas",
+          "status": "done",
+          "estimate_min": null,
+          "difficulty": 6,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T05:35:00-05:00", "end": "2026-07-06T05:55:00-05:00", "note": "config/app.php timezone + localOffset antes de agrupar", "manual": true }
+          ],
+          "summary": "Laravel 12 fijaba config/app.php a 'UTC' y agrupaba el heatmap con +5 h; corregido a America/Guayaquil y offset aplicado antes de cada GROUP BY.",
+          "steps": ["Timestamps a UTC en el recorder (migrate_ts_utc.py)", "localOffset() desde config('app.timezone')", "Auditoria de las 5 vistas de tiempo", "presenceGaps convertido a local"],
+          "files_changed": 6,
+          "notes": "Corromperia la vista central (horas productivas) con un corrimiento fijo de 5 h. Migracion one-shot con backup."
+        },
+        {
+          "id": "U9",
+          "type": "unplanned",
+          "title": "Rediseno a tema claro (dashboard + panel Qt) + regla permanente",
+          "status": "done",
+          "estimate_min": [60, 120],
+          "difficulty": 5,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T05:55:00-05:00", "end": "2026-07-06T06:12:00-05:00", "note": "tema claro completo; ActivityMetrics/Overview 06:11-06:12", "manual": true }
+          ],
+          "summary": "Dashboard y panel Qt rediseniados a tema claro por defecto; regla permanente de tema claro documentada en CLAUDE.md.",
+          "steps": ["Layout + 7 paginas a claro", "settings_dialog _STYLE claro", "Escalas de grafico legibles sobre blanco", "Regla en convenciones de CLAUDE.md"],
+          "files_changed": 12,
+          "notes": "Peticion del usuario junto con el fix de UTC."
+        },
+        {
+          "id": "G7",
+          "type": "gate",
+          "title": "Puerta 2C: vistas verificadas con datos reales",
+          "status": "done",
+          "estimate_min": [10, 20],
+          "difficulty": 3,
+          "work_log": [],
+          "summary": "Vistas verificadas contra la sesion real (~1015 muestras); heatmap corregido (lunes 1:00/2:00/3:00). Fase 2 completa.",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Sin registro de duracion de la revision."
+        }
+      ]
+    },
+    {
+      "id": "F8",
+      "name": "Mejoras post-Fase 2",
+      "items": [
+        {
+          "id": "P13",
+          "type": "prompt",
+          "title": "Inicio facil: gazetrack.bat, start_dashboard.bat, autostart (schtasks)",
+          "status": "done",
+          "estimate_min": [45, 90],
+          "difficulty": 4,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T05:50:00-05:00", "end": "2026-07-06T06:00:00-05:00", "note": "gazetrack.bat/start_dashboard.bat 05:57", "manual": true }
+          ],
+          "summary": "gazetrack.bat (venv + record --background), start_dashboard.bat (build + serve + navegador) y subcomando autostart --enable/--disable/--status (tarea de logon via schtasks, pythonw oculto).",
+          "steps": ["gazetrack.bat doble clic", "start_dashboard.bat (build si falta + artisan serve)", "cmd_autostart con schtasks /SC ONLOGON", "Deteccion de 'Acceso denegado' (requiere token interactivo/elevado)"],
+          "files_changed": 3,
+          "notes": "schtasks /Create necesita token interactivo completo; cmd_autostart lo reporta. Tray como control."
+        },
+        {
+          "id": "P14",
+          "type": "prompt",
+          "title": "Mapeo de ventana mirada (gazed_process/title, schema v2, dashboard)",
+          "status": "done",
+          "estimate_min": [90, 150],
+          "difficulty": 6,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-07-06T06:00:00-05:00", "end": "2026-07-06T06:12:00-05:00", "note": "activity_db v2 + logger + ActivityMetrics/Overview/Attention", "manual": true }
+          ],
+          "summary": "Que ventana MIRA el usuario (no solo la activa): WindowFromPoint + GA_ROOT por frame (overlay excluido), columnas gazed_process/gazed_window_title (moda del intervalo, NULL off-screen), migracion v2, y 'apps miradas vs activas' en el dashboard.",
+          "steps": ["Schema v2 con migracion aditiva (filas viejas NULL)", "_window_under + resolve modal por intervalo (costo trivial)", "Respeta --no-titles", "Atencion: comparacion mirada vs activa + alineacion foco-vs-mirada", "Resumen: tiempo por app mirada"],
+          "files_changed": 8,
+          "notes": "Evidencia: WindowFromPoint resolvio explorer.exe bajo el punto mientras Code.exe estaba activo; query gazed_vs_active lo expone. Datos reales previos quedan NULL hasta una sesion nueva."
+        }
+      ]
+    },
+    {
+      "id": "F9",
+      "name": "Publicacion y plan vivo",
+      "items": [
+        {
+          "id": "P15",
+          "type": "prompt",
+          "title": "Publicacion: README en ingles, licencia MIT, limpieza",
+          "status": "done",
+          "estimate_min": [30, 60],
+          "difficulty": 3,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-10-15T05:10:00-05:00", "end": "2026-10-15T06:05:00-05:00", "note": "README/LICENSE + limpieza", "manual": true, "commits": ["8127aaf", "69abb72"] },
+            { "actor": "coding_agent", "start": "2026-10-15T09:50:00-05:00", "end": "2026-10-15T10:05:00-05:00", "note": "nombre de autor completo", "manual": true, "commits": ["445c2bb"] }
+          ],
+          "summary": "README en ingles + licencia MIT + limpieza previa a publicar; autor como Washington X. Quevedo.",
+          "steps": ["docs: English README and MIT license (8127aaf)", "chore: final cleanup before publishing (69abb72)", "docs: full author name (445c2bb)"],
+          "files_changed": 4,
+          "notes": "Tramos derivados de los timestamps de los commits (zona -05:00)."
+        },
+        {
+          "id": "P16",
+          "type": "prompt",
+          "title": "Plan vivo (plan.json + skill) y commits logicos del trabajo pendiente",
+          "status": "in_progress",
+          "estimate_min": [60, 120],
+          "difficulty": 5,
+          "work_log": [
+            { "actor": "coding_agent", "start": "2026-10-18T14:05:00-05:00", "end": "2026-10-18T14:45:00-05:00", "note": "plan.json reconstruido + skill del proyecto + .gitignore + commits", "manual": true }
+          ],
+          "summary": "Creacion del plan vivo del proyecto (plan.json con todo el historial), skill corta que remite al kit, y commits logicos de 2A.1/2B/2B.1/2C/utilidades.",
+          "steps": ["plan.json desde el formato del kit", "Skill .claude/skills/plan-vivo del proyecto", ".gitignore para el dashboard (sin secretos ni artefactos)", "Commits logicos, autor Washington"],
+          "files_changed": 0,
+          "notes": "Tarea actual (2026-10-18). Las sesiones de julio no se conservaron: el historial de las fases 1-2C se reconstruyo de PROJECT.md + timestamps de archivos/commits y los tramos van marcados manual (duracion aproximada)."
+        }
+      ]
+    }
+  ]
+}
