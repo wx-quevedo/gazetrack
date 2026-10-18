@@ -35,6 +35,18 @@ class OverlayConfig:
     # Logging (2B): gaze-zone grid over the screen
     grid_cols: int = 6
     grid_rows: int = 3
+    # Events + snapshots (2B.1). Events are always logged as metrics; saving
+    # a face image is OPT-IN (off by default) and never leaves the machine.
+    snapshots_enabled: bool = False
+    snapshot_burst: int = 1              # frames per event (1, or 3 at 1 fps)
+    snapshot_retention_days: int = 14    # older snapshot folders are purged
+    off_screen_sustained_s: int = 30     # OFF_SCREEN_SUSTAINED threshold
+    face_absent_s: int = 60              # FACE_ABSENT threshold
+    distraction_return_min: float = 5.0  # min distraction before RETURN fires
+    focus_block_min: float = 15.0        # continuous focus for FOCUS_BLOCK
+    # Alarm (2C): a sober Windows toast after sustained off-screen time.
+    alarm_enabled: bool = False
+    alarm_off_screen_min: float = 10.0
 
 
 DEFAULTS = OverlayConfig()
@@ -53,6 +65,15 @@ def _to_yaml(cfg: OverlayConfig) -> dict:
         "fade_ms": int(cfg.fade_ms),
         "grid_cols": int(cfg.grid_cols),
         "grid_rows": int(cfg.grid_rows),
+        "snapshots_enabled": bool(cfg.snapshots_enabled),
+        "snapshot_burst": int(cfg.snapshot_burst),
+        "snapshot_retention_days": int(cfg.snapshot_retention_days),
+        "off_screen_sustained_s": int(cfg.off_screen_sustained_s),
+        "face_absent_s": int(cfg.face_absent_s),
+        "distraction_return_min": float(cfg.distraction_return_min),
+        "focus_block_min": float(cfg.focus_block_min),
+        "alarm_enabled": bool(cfg.alarm_enabled),
+        "alarm_off_screen_min": float(cfg.alarm_off_screen_min),
     }
 
 
@@ -73,10 +94,17 @@ def save_config(cfg: OverlayConfig) -> None:
                            encoding="utf-8")
 
 
+_INT_FIELDS = ("dot_size", "fade_ms", "grid_cols", "grid_rows",
+               "snapshot_burst", "snapshot_retention_days",
+               "off_screen_sustained_s", "face_absent_s")
+
+
 def _coerce(name: str, value):
     if name == "dot_color":
         return tuple(int(v) for v in value)
-    if name in ("dot_size", "fade_ms", "grid_cols", "grid_rows"):
+    if name in ("snapshots_enabled", "alarm_enabled"):
+        return bool(value)
+    if name in _INT_FIELDS:
         return int(value)
     return float(value)
 

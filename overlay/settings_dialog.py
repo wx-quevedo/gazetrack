@@ -18,28 +18,30 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from overlay.config import DEFAULTS, OverlayConfig
 
+# Light theme (project rule: light by default; dark only if asked).
 _STYLE = """
-QDialog { background: #1e1e1e; }
-QWidget { color: #ebebeb; font-size: 13px; }
+QDialog { background: #f4f4f5; }
+QWidget { color: #27272a; font-size: 13px; }
 QGroupBox {
-    border: 1px solid #3a3a3a; border-radius: 6px; margin-top: 14px;
-    padding: 10px 12px 12px 12px;
+    border: 1px solid #d4d4d8; border-radius: 6px; margin-top: 14px;
+    padding: 10px 12px 12px 12px; background: #ffffff;
 }
 QGroupBox::title {
     subcontrol-origin: margin; left: 10px; padding: 0 4px;
-    color: #b8b8b8; font-weight: 600;
+    color: #52525b; font-weight: 600;
 }
-QLabel#hint { color: #8f8f8f; font-size: 11px; }
-QLabel#shortcut { color: #cfcfcf; }
+QLabel#hint { color: #71717a; font-size: 11px; }
+QLabel#shortcut { color: #3f3f46; }
+QCheckBox { color: #27272a; }
 QSpinBox, QDoubleSpinBox {
-    background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 4px;
-    padding: 3px 6px; min-width: 90px;
+    background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px;
+    padding: 3px 6px; min-width: 90px; color: #27272a;
 }
 QPushButton {
-    background: #2d2d2d; border: 1px solid #454545; border-radius: 4px;
-    padding: 6px 14px;
+    background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px;
+    padding: 6px 14px; color: #27272a;
 }
-QPushButton:hover { background: #383838; }
+QPushButton:hover { background: #eef0f2; }
 QPushButton#swatch { min-width: 48px; }
 """
 
@@ -56,6 +58,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self.setMinimumWidth(430)
         self._loading = False
         self._color = tuple(config.dot_color)
+        # Base config: current_config() overrides only the panel-editable
+        # fields onto this, so config fields NOT in the panel (event
+        # thresholds set via flags/yaml) are preserved.
+        self._base = config
 
         root = QtWidgets.QVBoxLayout(self)
         root.setSpacing(12)
@@ -63,6 +69,8 @@ class SettingsDialog(QtWidgets.QDialog):
         root.addWidget(self._smoothing_group())
         root.addWidget(self._fade_group())
         root.addWidget(self._logging_group())
+        root.addWidget(self._captures_group())
+        root.addWidget(self._alarms_group())
         root.addWidget(self._shortcuts_group())
         root.addLayout(self._buttons())
 
@@ -146,6 +154,51 @@ class SettingsDialog(QtWidgets.QDialog):
                   "que zona miras. Aplica a la proxima sesion de registro.")
         return g
 
+    def _captures_group(self) -> QtWidgets.QGroupBox:
+        g = QtWidgets.QGroupBox("Capturas de eventos (opcional)")
+        v = QtWidgets.QVBoxLayout(g)
+        self.snapshots = QtWidgets.QCheckBox(
+            "Guardar una imagen de la camara al detectar eventos")
+        self.snapshots.toggled.connect(self._on_change)
+        v.addWidget(self.snapshots)
+        info = QtWidgets.QLabel(
+            "Desactivado por defecto. Si lo activas, al detectar eventos "
+            "(ausencia, distraccion, bloque de foco) se guarda un fotograma "
+            "de tu rostro en data/snapshots/. Las imagenes son 100% locales, "
+            "NUNCA salen de esta maquina, y se borran automaticamente segun "
+            "la retencion. Los eventos se registran siempre; solo la imagen "
+            "es opcional.")
+        info.setObjectName("hint")
+        info.setWordWrap(True)
+        v.addWidget(info)
+        form = QtWidgets.QFormLayout()
+        self.retention = self._spin(1, 365, 1, suffix=" dias")
+        self.burst = self._spin(1, 3, 1, suffix=" fotograma(s)")
+        self._row(form, "Retencion", self.retention)
+        self._row(form, "Rafaga por evento", self.burst)
+        v.addLayout(form)
+        return g
+
+    def _alarms_group(self) -> QtWidgets.QGroupBox:
+        g = QtWidgets.QGroupBox("Alarmas")
+        v = QtWidgets.QVBoxLayout(g)
+        self.alarm = QtWidgets.QCheckBox(
+            "Avisar tras tiempo continuo fuera de pantalla")
+        self.alarm.toggled.connect(self._on_change)
+        v.addWidget(self.alarm)
+        info = QtWidgets.QLabel(
+            "Notificacion sobria de Windows (sin sonidos estridentes, "
+            "desactivable) cuando llevas demasiado tiempo sin mirar la "
+            "pantalla durante una sesion de registro.")
+        info.setObjectName("hint")
+        info.setWordWrap(True)
+        v.addWidget(info)
+        form = QtWidgets.QFormLayout()
+        self.alarm_min = self._spin(1, 120, 1, suffix=" min")
+        self._row(form, "Umbral off-screen", self.alarm_min)
+        v.addLayout(form)
+        return g
+
     def _shortcuts_group(self) -> QtWidgets.QGroupBox:
         g = QtWidgets.QGroupBox("Atajos de teclado")
         v = QtWidgets.QVBoxLayout(g)
@@ -182,6 +235,7 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def set_from_config(self, cfg: OverlayConfig) -> None:
         self._loading = True
+        self._base = cfg
         self._color = tuple(cfg.dot_color)
         self.size.setValue(int(cfg.dot_size))
         self.opacity.setValue(cfg.dot_opacity)
@@ -193,12 +247,17 @@ class SettingsDialog(QtWidgets.QDialog):
         self.fade_ms.setValue(int(cfg.fade_ms))
         self.grid_cols.setValue(int(cfg.grid_cols))
         self.grid_rows.setValue(int(cfg.grid_rows))
+        self.snapshots.setChecked(bool(cfg.snapshots_enabled))
+        self.retention.setValue(int(cfg.snapshot_retention_days))
+        self.burst.setValue(int(cfg.snapshot_burst))
+        self.alarm.setChecked(bool(cfg.alarm_enabled))
+        self.alarm_min.setValue(int(round(cfg.alarm_off_screen_min)))
         self._apply_swatch()
         self._loading = False
 
     def current_config(self) -> OverlayConfig:
         return replace(
-            DEFAULTS,
+            self._base,           # preserve fields not exposed in the panel
             dot_size=int(self.size.value()),
             dot_opacity=float(self.opacity.value()),
             dot_color=self._color,
@@ -209,7 +268,12 @@ class SettingsDialog(QtWidgets.QDialog):
             offscreen_margin=float(self.offscreen.value()) / 100.0,
             fade_ms=int(self.fade_ms.value()),
             grid_cols=int(self.grid_cols.value()),
-            grid_rows=int(self.grid_rows.value()))
+            grid_rows=int(self.grid_rows.value()),
+            snapshots_enabled=bool(self.snapshots.isChecked()),
+            snapshot_retention_days=int(self.retention.value()),
+            snapshot_burst=int(self.burst.value()),
+            alarm_enabled=bool(self.alarm.isChecked()),
+            alarm_off_screen_min=float(self.alarm_min.value()))
 
     # --- slots -------------------------------------------------------------
     def _on_change(self) -> None:
