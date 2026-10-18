@@ -1,0 +1,16 @@
+# macOS (Apple Silicon) dependency set. Same pinned versions as
+# requirements.txt, but standard PyPI builds: torch 2.5.1 on arm64 ships the
+# MPS backend (Metal GPU), so no CUDA index and no +cu121 local tags.
+# pywin32 is Windows-only and omitted; every win32 import in the code is
+# lazy and only reached by Windows-specific overlay/logger paths.
+# Windows keeps using requirements.txt (unchanged).
+torch==2.5.1
+torchvision==0.20.1
+mediapipe==0.10.14
+opencv-contrib-python==4.10.0.84
+numpy==1.26.4
+scikit-learn==1.5.2
+PyYAML==6.0.2
+PyQt6==6.7.1
+pynput==1.7.7
+psutil==6.0.0

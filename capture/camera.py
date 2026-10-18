@@ -24,6 +24,23 @@ c922 Pro Stream Webcam):
 
 Setting precedence for index/focus/exposure: explicit argument (CLI flag) >
 data/camera.yaml > built-in default.
+
+macOS (sys.platform == "darwin") uses a separate AVFoundation path
+(cv2.CAP_AVFOUNDATION). Honest limits of that path:
+- OpenCV's AVFoundation backend only implements frame size and fps; it
+  has no manual focus, autofocus or exposure controls (set() returns False
+  and nothing changes), and macOS does not expose UVC focus/exposure to
+  apps anyway. Focus, exposure and auto-exposure therefore stay under the
+  camera's own automatic control: the requested values are NOT applied,
+  and the code says so instead of pretending. --focus-sweep is unavailable.
+- The camera picks the closest supported format; resolution and fps are
+  reported as MEASURED from delivered frames, never from the request.
+- In dim light the automatic exposure lengthens and the frame rate drops
+  (the same ~5-15 fps symptom as a long manual exposure on Windows); add
+  frontal light.
+- Camera access needs the macOS privacy permission (System Settings >
+  Privacy & Security > Camera) for the app that launches Python (Terminal,
+  iTerm, the IDE...). Until granted, open() fails.
 """
 
 from __future__ import annotations
@@ -37,6 +54,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 import yaml
+
+IS_MACOS = sys.platform == "darwin"
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "camera.yaml"
 
@@ -198,6 +217,10 @@ class Camera:
         return False
 
     def _apply_controls(self, cap: cv2.VideoCapture) -> None:
+        if self._backend_name == "AVFOUNDATION":
+            # No focus/exposure controls on this backend (see module
+            # docstring); nothing to apply, nothing to fake.
+            return
         if self.disable_autofocus:
             cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
             cap.set(cv2.CAP_PROP_FOCUS, self.focus)
@@ -210,7 +233,59 @@ class Camera:
                 cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, _AUTO_EXPOSURE_OFF)
             cap.set(cv2.CAP_PROP_EXPOSURE, self.exposure)
 
+    def _open_avfoundation(self) -> cv2.VideoCapture:
+        """macOS path: AVFoundation with size/fps requested, no FOURCC."""
+        cap = cv2.VideoCapture(self.index, cv2.CAP_AVFOUNDATION)
+        if not cap.isOpened():
+            cap.release()
+            raise RuntimeError(
+                f"Could not open camera index {self.index} (AVFoundation). "
+                "If OpenCV printed 'not authorized to capture video', grant "
+                "camera access to the app running Python in System Settings "
+                "> Privacy & Security > Camera, then restart that app. "
+                "Otherwise check the index (built-in FaceTime camera is "
+                "usually 0; Continuity Camera iPhones also enumerate) and "
+                "that no other app holds the camera.")
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        cap.set(cv2.CAP_PROP_FPS, self.fps)
+        return cap
+
     def open(self) -> "Camera":
+        if IS_MACOS:
+            self._cap = self._open_avfoundation()
+            self._backend_name = self._cap.getBackendName()
+            # Warm-up: the first frames after start are dark while the
+            # automatic exposure converges.
+            frame = None
+            for _ in range(10):
+                ok, grabbed = self._cap.read()
+                if ok:
+                    frame = grabbed
+            if frame is None:
+                self.release()
+                raise RuntimeError(
+                    f"Camera index {self.index} opened but delivered no "
+                    "frames. Check the macOS camera permission for the app "
+                    "running Python.")
+            if float(frame.mean()) < 1.0:
+                # Measured on an M1 MacBook: an idle Continuity Camera
+                # (iPhone) enumerates first and streams all-black frames at
+                # full fps, so a wrong index looks like "no face detected".
+                print(f"WARNING: camera {self.index} delivers all-black "
+                      "frames. It is probably a Continuity Camera iPhone "
+                      "that is not active, or a covered lens. Try another "
+                      "--index (the built-in FaceTime camera is often 1 "
+                      "when an iPhone is nearby).")
+            h, w = frame.shape[:2]
+            print(f"camera {self.index} [{self._backend_name}]: "
+                  f"{w}x{h} measured (requested {self.width}x{self.height}"
+                  f"@{self.fps:g}), fps measured={self.measure_fps():.1f}")
+            print(f"  settings source: index={self._index_src}; "
+                  "focus/exposure NOT applied on macOS (camera stays on "
+                  "auto focus and auto exposure)")
+            return self
+
         # Strategy determined empirically on the Logitech C920/C922 UVC
         # family under Windows: OpenCV's DSHOW backend selects the media
         # type by resolution alone and lands on YUY2, which the USB
@@ -349,6 +424,9 @@ class Camera:
     def verify(self, measure: bool = True) -> bool:
         """Print requested vs. actual settings and diagnose low fps."""
 
+        if self._backend_name == "AVFOUNDATION":
+            return self._verify_avfoundation(measure)
+
         def describe(state: bool | None) -> str:
             if state is None:
                 return ("off requested (driver does not report state back; "
@@ -417,6 +495,39 @@ class Camera:
                   "if the laptop has a built-in webcam.")
         return st.resolution_ok and not fps_low
 
+    def _verify_avfoundation(self, measure: bool) -> bool:
+        """macOS verify: measured size/fps only; controls are unavailable.
+
+        The 1920x1080 target is the C920 requirement on the Windows rig. A
+        built-in Mac camera may land on another mode; that is reported but
+        is not a failure here (the gaze pipeline accepts any resolution and
+        builds its camera matrix from the real frame size). Low measured fps
+        IS a failure.
+        """
+        frame = self.read()
+        real_fps = self.measure_fps() if measure else None
+        fps_low = real_fps is not None and real_fps < self.fps - 3
+        if frame is None:
+            print("ERROR: frame grab failed.")
+            return False
+        h, w = frame.shape[:2]
+        size_ok = (w, h) == (self.width, self.height)
+        print(f"resolution         : requested {self.width}x{self.height}, "
+              f"measured {w}x{h}"
+              + ("" if size_ok else "   [differs; not a failure on macOS]"))
+        print(f"fps (driver)       : requested {self.fps:.0f}, reported "
+              f"{self._cap.get(cv2.CAP_PROP_FPS):.1f}")
+        if real_fps is not None:
+            print(f"fps (measured)     : {real_fps:.1f}"
+                  + ("" if not fps_low else "   [WARN: low]"))
+        print("focus / exposure   : automatic (AVFoundation exposes no "
+              "manual controls; requested values not applied)")
+        if fps_low:
+            print("DIAGNOSIS: with automatic exposure, dim light lengthens "
+                  "the exposure and caps the frame rate. Add frontal light. "
+                  "Also close other apps using the camera.")
+        return not fps_low
+
     def release(self) -> None:
         if self._cap is not None:
             self._cap.release()
@@ -444,6 +555,12 @@ def focus_sweep(camera: Camera) -> int:
     data/camera.yaml, ESC exits without saving. Center your face in the
     frame and maximize the sharpness value.
     """
+    if IS_MACOS:
+        print("ERROR: --focus-sweep is not available on macOS: AVFoundation "
+              "exposes no manual focus or exposure controls, so the camera "
+              "stays on auto focus / auto exposure. Nothing to tune or "
+              "save. Use --preview to check the image instead.")
+        return 1
     window = "gazetrack - focus sweep"
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
     print("focus sweep: W/S focus +/-5, E/D exposure +/-1, "

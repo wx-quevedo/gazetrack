@@ -118,17 +118,45 @@ def _angles_from_vector(vec: np.ndarray) -> tuple[float, float]:
     return float(pitch), float(yaw)
 
 
-class EthXGazeEstimator:
-    """CUDA wrapper around the ETH-XGaze ResNet-18 model."""
+def resolve_device(requested: str = "auto") -> torch.device:
+    """Pick the inference device: cuda > mps > clear error.
 
-    def __init__(self, device: str = "cuda",
+    "auto" prefers CUDA (the Windows/RTX target) and falls back to MPS
+    (Apple Silicon Metal GPU). An explicit "cuda" or "mps" is honoured or
+    fails loudly; "cpu" is accepted only for debugging. There is no silent
+    CPU fallback: CPU inference is 10-50x slower and would hide a broken
+    install.
+    """
+    mps_ok = (getattr(torch.backends, "mps", None) is not None
+              and torch.backends.mps.is_available())
+    if requested == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if mps_ok:
+            return torch.device("mps")
+        raise RuntimeError(
+            "No GPU backend available (neither CUDA nor MPS). Run "
+            "'python check_env.py' for a diagnosis (most likely a CPU-only "
+            "PyTorch build or a driver problem). Pass --device cpu only "
+            "for debugging.")
+    if requested == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError(
+            "CUDA is not available. Run 'python check_env.py' for a "
+            "diagnosis (most likely a CPU-only PyTorch build or a "
+            "driver problem). Pass device='cpu' only for debugging.")
+    if requested == "mps" and not mps_ok:
+        raise RuntimeError(
+            "MPS is not available. It requires Apple Silicon, macOS 12.3+ "
+            "and an arm64 PyTorch build. Run 'python check_env.py'.")
+    return torch.device(requested)
+
+
+class EthXGazeEstimator:
+    """GPU (CUDA or MPS) wrapper around the ETH-XGaze ResNet-18 model."""
+
+    def __init__(self, device: str = "auto",
                  weights_path: Path | None = None):
-        if device == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError(
-                "CUDA is not available. Run 'python check_env.py' for a "
-                "diagnosis (most likely a CPU-only PyTorch build or a "
-                "driver problem). Pass device='cpu' only for debugging.")
-        self.device = torch.device(device)
+        self.device = resolve_device(device)
 
         path = download_weights(weights_path or WEIGHTS_PATH)
         checkpoint = torch.load(path, map_location="cpu",
@@ -141,7 +169,7 @@ class EthXGazeEstimator:
         self._model.load_state_dict(state_dict)
         self._model.eval().to(self.device)
 
-        # Warm up so the first real frame does not pay CUDA init cost.
+        # Warm up so the first real frame does not pay GPU init cost.
         with torch.inference_mode():
             self._model(torch.zeros(1, 3, INPUT_SIZE, INPUT_SIZE,
                                     device=self.device))
@@ -299,8 +327,9 @@ def main() -> int:
     parser.add_argument("--index", type=int, default=None,
                         help="camera index (default: data/camera.yaml, "
                              "else 0)")
-    parser.add_argument("--device", default="cuda",
-                        help="inference device (default: cuda)")
+    parser.add_argument("--device", default="auto",
+                        help="inference device: auto (cuda > mps), cuda, "
+                             "mps, or cpu for debugging (default: auto)")
     parser.add_argument("--show-patch", action="store_true",
                         help="also show the normalized 224x224 face patch")
     parser.add_argument("--download-only", action="store_true",
@@ -312,6 +341,7 @@ def main() -> int:
         return 0
 
     estimator = EthXGazeEstimator(device=args.device)
+    print(f"inference device: {estimator.device}")
     window = "gazetrack - live gaze check"
 
     with Camera(index=args.index) as camera, HeadTracker() as tracker:

@@ -494,8 +494,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--index", type=int, default=None,
                        help="camera index (default: data/camera.yaml, "
                             "else 0)")
-        p.add_argument("--device", default="cuda",
-                       help="inference device (default: cuda)")
+        p.add_argument("--device", default="auto",
+                       help="inference device: auto (cuda > mps), cuda, "
+                            "mps (default: auto)")
         p.add_argument("--focus", type=float, default=None,
                        help="C920 manual focus 0-255, step 5 (default: "
                             f"data/camera.yaml, else {DEFAULT_FOCUS})")

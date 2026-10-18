@@ -101,6 +101,31 @@ Run:
 
 You can also test each component on its own: `python -m capture.camera --preview`, `python -m gaze.mediapipe_head` and `python -m gaze.eth_xgaze`. Everything runs locally, and all runtime data goes to `data/`, which git ignores.
 
+### macOS (Apple Silicon): layer 1 only
+
+Which requirements file to use:
+
+| Platform | File | GPU backend |
+|---|---|---|
+| Windows (primary rig) | `requirements.txt` (`+cu121` builds) | CUDA |
+| macOS, Apple Silicon | `requirements-macos.txt` (same versions, standard PyPI builds, no pywin32) | MPS (Metal) |
+
+Status on macOS: layer 1 (camera, MediaPipe, ETH-XGaze, gaze yaw/pitch) runs and was verified live on an M1 MacBook. The calibration UI, overlay and activity logger have not been ported yet (the logger and overlay rely on win32 APIs).
+
+```bash
+brew install python@3.12
+/opt/homebrew/bin/python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements-macos.txt
+.venv/bin/python check_env.py
+.venv/bin/python -m gaze.eth_xgaze
+```
+
+- `check_env.py` uses `sys.platform`: on macOS it requires `torch.backends.mps.is_available()` and runs a matmul on MPS; on Windows it still requires CUDA.
+- Inference picks the device with `--device auto` (default): CUDA, then MPS, else a clear error. There is no silent CPU fallback.
+- Capture uses AVFoundation. OpenCV's AVFoundation backend has no focus, autofocus or exposure controls, so these settings have no effect on macOS: the camera stays on auto focus and auto exposure, and `--focus-sweep` reports that it is unavailable. Resolution and fps are printed as measured values.
+- Camera index: an iPhone used as Continuity Camera can enumerate as index 0 and stream black frames. On the test MacBook the built-in FaceTime camera was index 1 (1280x720 at 30 fps). Set it once with `--index 1`, or persist it in `data/camera.yaml` (`index: 1`).
+- macOS asks for camera permission for the app that launches Python (Terminal, iTerm, an IDE). Allow it, or enable it later in System Settings > Privacy & Security > Camera, then run the command again.
+
 ## What I learned / key technical decisions
 
 - **I kept two strict layers.** The screen mapper only consumes angles through a `sample_provider` and never touches frames or the CNN. Because of that, I could test calibration, cross-validation and serialization headless, and I could add pursuit data and the overlay without changing the gaze model.

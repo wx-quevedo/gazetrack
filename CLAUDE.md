@@ -45,6 +45,15 @@ regression as layer 1 is explicitly forbidden (caps at 5-6 deg).
   the ~5 fps signature; `verify()` prints the diagnosis.
 - `python check_env.py` must pass before debugging anything else; a CPU-only
   torch build is a hard failure.
+- **macOS foundation (layer 1 only)**: `requirements-macos.txt` (same pins,
+  standard builds, MPS; no pywin32), Python 3.12 venv at `.venv/bin/python`.
+  `check_env.py` guards by `sys.platform` (MPS on darwin, CUDA elsewhere);
+  `gaze.eth_xgaze.resolve_device` picks cuda > mps > error (`--device auto`).
+  `capture/camera.py` uses AVFoundation on darwin: no focus/exposure controls
+  (set() returns False, verified), sweep unavailable, size/fps reported as
+  measured. On the M1 MacBook the FaceTime camera is index 1 (1280x720@30);
+  index 0 is an idle Continuity Camera iPhone that streams black frames
+  (open() warns). Overlay/logger/calibration not ported to macOS yet.
 
 ## Screen geometry (physical, required for cm/deg)
 
