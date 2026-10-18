@@ -6,3 +6,18 @@ models/*.tmp
 data/*
 !data/.gitkeep
 !models/.gitkeep
+
+# Dashboard (Laravel 12). Also covered by dashboard/*/.gitignore; declared here
+# so the top-level repo never tracks secrets, dependencies, build output or the
+# dashboard's local SQLite. The dashboard ships .env.example (no secrets).
+/dashboard/.env
+/dashboard/.env.backup
+/dashboard/vendor/
+/dashboard/node_modules/
+/dashboard/public/build/
+/dashboard/public/hot
+/dashboard/storage/*.key
+/dashboard/database/*.sqlite
+/dashboard/database/*.sqlite-journal
+/dashboard/.phpunit.cache
+/dashboard/.phpunit.result.cache
