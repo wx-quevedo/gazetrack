@@ -3,7 +3,7 @@
   "schema_version": 1,
   "project": "gazetrack",
   "title": "gazetrack — mirada en webcam y productividad",
-  "updated_at": "2026-10-18T14:45:00-05:00",
+  "updated_at": "2026-10-18T16:12:00-05:00",
   "phases": [
     {
       "id": "F1",
@@ -513,16 +513,121 @@
           "id": "P16",
           "type": "prompt",
           "title": "Plan vivo (plan.json + skill) y commits logicos del trabajo pendiente",
-          "status": "in_progress",
+          "status": "done",
           "estimate_min": [60, 120],
           "difficulty": 5,
           "work_log": [
-            { "actor": "coding_agent", "start": "2026-10-18T14:05:00-05:00", "end": "2026-10-18T14:45:00-05:00", "note": "plan.json reconstruido + skill del proyecto + .gitignore + commits", "manual": true }
+            { "actor": "coding_agent", "start": "2026-10-18T14:32:29-05:00", "end": "2026-10-18T14:50:47-05:00", "note": "real (sesion + commits, confirmado con pnpm tiempos): plan.json + skill + .gitignore + 5 commits", "manual": true, "commits": ["6432428", "e3015b0", "193eebc", "b24f7a5", "dba95c0"] },
+            { "actor": "coding_agent", "start": "2026-10-18T16:04:40-05:00", "end": "2026-10-18T16:12:00-05:00", "note": "actualizacion del plan con la fase de publicacion (F10) + PROJECT.md", "manual": true }
           ],
-          "summary": "Creacion del plan vivo del proyecto (plan.json con todo el historial), skill corta que remite al kit, y commits logicos de 2A.1/2B/2B.1/2C/utilidades.",
-          "steps": ["plan.json desde el formato del kit", "Skill .claude/skills/plan-vivo del proyecto", ".gitignore para el dashboard (sin secretos ni artefactos)", "Commits logicos, autor Washington"],
+          "summary": "Plan vivo del proyecto (plan.json con todo el historial), skill corta que remite al kit, commits logicos de 2A.1/2B/2B.1/2C/utilidades y actualizacion posterior con los hitos de publicacion.",
+          "steps": ["plan.json desde el formato del kit", "Skill .claude/skills/plan-vivo del proyecto", ".gitignore del dashboard (sin secretos ni artefactos)", "5 commits logicos, autor Washington", "Actualizacion con F10 + PROJECT.md"],
+          "files_changed": 4,
+          "notes": "Los tramos de hoy son reales (sesion de Claude Code de hoy + timestamps de los commits, confirmados con pnpm tiempos del kit). Las sesiones de julio no se conservaron: el historial de las fases 1-2C se reconstruyo de PROJECT.md + timestamps de archivos/commits (tramos marcados manual, aproximados)."
+        }
+      ]
+    },
+    {
+      "id": "F10",
+      "name": "Publicacion y multiplataforma",
+      "estimate_min": [240, 360],
+      "items": [
+        {
+          "id": "P17",
+          "type": "prompt",
+          "title": "Decision de publicar multiplataforma y verificacion del remoto",
+          "status": "done",
+          "estimate_min": [10, 20],
+          "difficulty": 2,
+          "work_log": [
+            { "actor": "orchestrator", "start": "2026-10-18T14:20:00-05:00", "end": "2026-10-18T14:30:00-05:00", "note": "decision: repo publico multiplataforma; verificacion del remoto existente wx-quevedo/focus", "manual": true }
+          ],
+          "summary": "Decision de publicar el repo publico y portar a macOS; verificado el remoto existente wx-quevedo/focus.",
+          "steps": ["Decision de publicacion multiplataforma", "Verificacion del remoto wx-quevedo/focus"],
           "files_changed": 0,
-          "notes": "Tarea actual (2026-10-18). Las sesiones de julio no se conservaron: el historial de las fases 1-2C se reconstruyo de PROJECT.md + timestamps de archivos/commits y los tramos van marcados manual (duracion aproximada)."
+          "notes": "Decision de producto: repo publico, nombre gazetrack; la carpeta local de Windows sigue llamandose focus (no se renombra)."
+        },
+        {
+          "id": "P18",
+          "type": "prompt",
+          "title": "Rename del repo remoto a wx-quevedo/gazetrack",
+          "status": "done",
+          "estimate_min": [15, 30],
+          "difficulty": 2,
+          "work_log": [
+            { "actor": "orchestrator", "start": "2026-10-18T15:19:00-05:00", "end": "2026-10-18T15:48:00-05:00", "note": "rename via el navegador Chrome del usuario; GitHub redirige la URL vieja", "manual": true }
+          ],
+          "summary": "Repo remoto renombrado de focus a gazetrack; GitHub mantiene el redirect de la URL anterior.",
+          "steps": ["Rename focus -> gazetrack en GitHub (Chrome)", "Confirmar redirect de la URL vieja"],
+          "files_changed": 0,
+          "notes": "Hecho por el orquestador via el navegador del usuario."
+        },
+        {
+          "id": "P19",
+          "type": "prompt",
+          "title": "Actualizar remoto local, push de los 5 commits y clon en la Mac",
+          "status": "done",
+          "estimate_min": [10, 20],
+          "difficulty": 2,
+          "work_log": [
+            { "actor": "human", "start": "2026-10-18T15:48:00-05:00", "end": "2026-10-18T15:53:00-05:00", "note": "remoto -> gazetrack.git (15:48), push 445c2bb..dba95c0 a origin/main (15:50), clon en /Users/washingtonxquevedo/gazetrack (15:52)", "manual": true }
+          ],
+          "summary": "Remoto local apuntado a gazetrack.git, push de los 5 commits de Fase 2 a origin/main y clon del repo en la Mac.",
+          "steps": ["git remote set-url -> https://github.com/wx-quevedo/gazetrack.git", "git push origin main (445c2bb..dba95c0)", "git clone en /Users/washingtonxquevedo/gazetrack"],
+          "files_changed": 0,
+          "notes": "Acciones del usuario. La URL vieja (focus) sigue resolviendo por el redirect de GitHub."
+        },
+        {
+          "id": "M1",
+          "type": "prompt",
+          "title": "macOS: fundacion (MPS + camara AVFoundation + capa 1)",
+          "status": "pending",
+          "estimate_min": [90, 140],
+          "difficulty": 7,
+          "work_log": [],
+          "summary": "",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Port de la capa 1 a Mac: backend MPS para ETH-XGaze, captura por AVFoundation, verificacion de inferencia."
+        },
+        {
+          "id": "M2",
+          "type": "prompt",
+          "title": "macOS: overlay transparente + panel de configuracion",
+          "status": "pending",
+          "estimate_min": [45, 80],
+          "difficulty": 6,
+          "work_log": [],
+          "summary": "",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Overlay click-through y panel Qt equivalentes en macOS (ventana sin foco, siempre encima)."
+        },
+        {
+          "id": "M3",
+          "type": "prompt",
+          "title": "macOS: recorder (eventos Quartz + arranque launchd)",
+          "status": "pending",
+          "estimate_min": [60, 90],
+          "difficulty": 7,
+          "work_log": [],
+          "summary": "",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Conteos de teclado/mouse via Quartz event taps (permiso de accesibilidad) y autostart con launchd en vez de schtasks."
+        },
+        {
+          "id": "M4",
+          "type": "prompt",
+          "title": "macOS: verificacion y calibracion en la Mac",
+          "status": "pending",
+          "estimate_min": [45, 50],
+          "difficulty": 5,
+          "work_log": [],
+          "summary": "",
+          "steps": [],
+          "files_changed": 0,
+          "notes": "Calibracion + evaluate en el hardware de la Mac y verificacion de paridad con Windows."
         }
       ]
     }

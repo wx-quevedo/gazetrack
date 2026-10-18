@@ -5,7 +5,7 @@ No confundir con los docs de fase (PHASE-XX-*.md), que son specs de trabajo para
 agente de Claude Code. Este documento lo mantiene Claude.ai y se actualiza con cada
 avance relevante.
 
-Última actualización: 2026-07-05
+Última actualización: 2026-10-18
 
 ---
 
@@ -358,6 +358,41 @@ focus/
   real). Criterios de éxito de la línea base: evaluate ≈ LOOCV (no 22x), ~0%
   off-screen en tabla raw, patrón de zonas normal (centro mejor que extremos).
 
+2026-07-06 — Fase 2 completa en el árbol de trabajo
+- Tras el "mvp created" (Fase 1 + 1B), el mismo maratón continuó hasta
+  ~06:12 con 2A (overlay), 2A.1 (panel), 2B (registro), 2B.1 (snapshots),
+  2C (dashboard Laravel/Inertia/React), el fix de agrupación UTC, el rediseño
+  a tema claro y las mejoras post-fase (inicio fácil + mapeo de ventana
+  mirada). Todo quedó en el árbol de trabajo, sin commitear todavía.
+
+2026-10-15 — Publicación inicial del repositorio
+- Repo subido a GitHub (wx-quevedo) con README en inglés, licencia MIT y
+  limpieza previa; autor Washington X. Quevedo (commits 8127aaf, 69abb72,
+  445c2bb). En ese momento la Fase 2 completa seguía sin commitear.
+
+2026-10-18 — Plan vivo, release público y plan para macOS
+- Plan vivo del proyecto creado (plan.json con todo el historial: Fases 1,
+  1B, 2A-2C y mejoras post-fase) + skill corta del proyecto; el trabajo de
+  Fase 2 pendiente se dividió en 5 commits lógicos (445c2bb..dba95c0), autor
+  Washington, con .gitignore endurecido para el dashboard. Las sesiones de
+  julio no se conservaron: esos tramos del plan se reconstruyeron de este
+  documento + timestamps de archivos/commits (marcados aproximados); los de
+  hoy son reales (sesión de Claude Code + commits, confirmados con el script
+  de tiempos del kit).
+- DECISIÓN DE PRODUCTO: publicar el repo PÚBLICO y multiplataforma, con
+  nombre gazetrack. La carpeta local de Windows sigue llamándose focus (no se
+  renombra); solo cambia el nombre del repositorio remoto. GitHub mantiene el
+  redirect de la URL vieja (focus -> gazetrack).
+- Hitos (hora local America/Guayaquil):
+  * ~14:20-14:30 (orquestador): decisión de publicar multiplataforma y
+    verificación del remoto existente wx-quevedo/focus.
+  * 14:32-14:50 (agente): plan vivo + 5 commits lógicos de la Fase 2.
+  * 15:19-15:48 (orquestador, vía el navegador Chrome del usuario): rename
+    del repo a wx-quevedo/gazetrack.
+  * 15:48 (usuario): remoto local -> https://github.com/wx-quevedo/gazetrack.git.
+  * 15:50 (usuario): push de los 5 commits (445c2bb..dba95c0) a origin/main.
+  * 15:52 (usuario): clon en la Mac en /Users/washingtonxquevedo/gazetrack.
+
 ## 6. Problemas encontrados y estado
 
 RESUELTOS
@@ -536,6 +571,23 @@ FASES FUTURAS (fuera del alcance de Fase 1)
   PHASE-02-productivity.md.
 - Score de concentración: solo derivado después, calibrado contra auto-reporte
   del usuario; nunca inventado desde visión pura.
+
+SIGUIENTE: PORT A macOS (decisión 2026-10-18, multiplataforma). Tras el release
+público (repo gazetrack), llevar el sistema a la Mac en cuatro fases, con paridad
+funcional con Windows. Estimado total del port: 4 a 6 h. Fases en plan.json como
+F10 (M1-M4):
+- M1 — Fundación: backend MPS para ETH-XGaze (capa 1), captura por AVFoundation,
+  verificación de inferencia en Mac.
+- M2 — Overlay + panel: overlay transparente click-through y panel Qt
+  equivalentes en macOS (ventana sin foco, siempre encima).
+- M3 — Recorder: conteos de teclado/mouse vía Quartz event taps (permiso de
+  accesibilidad) y autostart con launchd en vez de schtasks.
+- M4 — Verificación y calibración en el hardware de la Mac y paridad con Windows.
+La capa 2 (mapeo, calibración, One-Euro) y la lógica del dashboard son
+agnósticas del SO; el port se concentra en captura, overlay, entrada e inicio.
+El kit plan-vivo ya contempla la copia de la Mac en
+/Users/washingtonxquevedo/plan-vivo; el plan de gazetrack se mantiene igual desde
+ambas máquinas (nunca se edita el kit desde la copia clonada).
 
 ## 8. Dinámica de trabajo (estándar para todos los proyectos)
 
