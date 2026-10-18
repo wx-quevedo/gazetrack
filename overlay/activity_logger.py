@@ -20,8 +20,10 @@ from collections import Counter
 
 from PyQt6 import QtCore
 
-from overlay.activity_db import (INTERVAL_SECONDS, STATE_CAMERA_LOST,
+from overlay.activity_db import (INTERVAL_SECONDS, STATE_CAMERA_LOST, STATE_OK,
                                  ActivityDB)
+
+_GA_ROOT = 2   # win32 GetAncestor flag: top-level owner of a window
 
 _MOVE_THROTTLE_S = 0.15   # count at most one mouse move per this window
 
@@ -41,7 +43,8 @@ class ActivityLogger(QtCore.QObject):
     """Aggregates per-frame samples + input counts into DB rows. Lives on the
     UI thread; the DB write per interval is a committed transaction."""
 
-    stateChanged = QtCore.pyqtSignal(bool)   # True = recording, False = paused
+    stateChanged = QtCore.pyqtSignal(bool)    # True = recording, False = paused
+    intervalLogged = QtCore.pyqtSignal(object)  # IntervalSummary (event detector)
 
     def __init__(self, db: ActivityDB, session_id: int,
                  screen_size: tuple[int, int], grid_cols: int, grid_rows: int,
@@ -53,6 +56,10 @@ class ActivityLogger(QtCore.QObject):
         self._cols, self._rows = grid_cols, grid_rows
         self._no_titles = no_titles
         self._paused = False
+        # HWND of our own overlay window, excluded from gaze->window mapping.
+        # It is click-through (WS_EX_TRANSPARENT) so WindowFromPoint already
+        # skips it; this is a belt-and-suspenders guard. Set after show().
+        self._exclude_hwnd = 0
 
         self._reset_accumulators()
         # Input counters (written from pynput threads, read/reset here).
@@ -79,6 +86,7 @@ class ActivityLogger(QtCore.QObject):
         self._states: Counter = Counter()
         self._procs: Counter = Counter()
         self._titles: Counter = Counter()
+        self._gazed_hwnds: Counter = Counter()   # window under the gaze point
 
     # --- per-frame gaze sample (from the worker, UI thread) ----------------
     @QtCore.pyqtSlot(object)
@@ -94,6 +102,13 @@ class ActivityLogger(QtCore.QObject):
             zone = zone_of(s.x, s.y, self._w, self._h, self._cols, self._rows)
             if zone:
                 self._zones[zone] += 1
+            # WHICH window the user is LOOKING at (only while tracking is
+            # healthy). One cheap win32 hit-test per frame; the process/title
+            # resolve happens once per interval on the modal HWND.
+            if s.state == STATE_OK:
+                hwnd = self._window_under(s.x, s.y)
+                if hwnd:
+                    self._gazed_hwnds[hwnd] += 1
 
     # --- foreground window sampling (1 Hz) ---------------------------------
     def _sample_window(self) -> None:
@@ -117,6 +132,51 @@ class ActivityLogger(QtCore.QObject):
         if not hwnd:
             return None, None
         title = win32gui.GetWindowText(hwnd) or None
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            proc = psutil.Process(pid).name()
+        except Exception:
+            proc = None
+        return proc, title
+
+    # --- gaze -> window mapping --------------------------------------------
+    def set_exclude_hwnd(self, hwnd: int) -> None:
+        """Register the overlay's own HWND so it is never resolved as the
+        looked-at window (defensive; it is already click-through)."""
+        self._exclude_hwnd = int(hwnd)
+
+    def _window_under(self, x: float, y: float):
+        """Top-level (GA_ROOT) HWND of the visible window under the screen
+        point (x, y), or None. WindowFromPoint honours z-order and skips
+        hidden/disabled/transparent windows (so the overlay is excluded), and
+        GA_ROOT climbs from the child control to its top-level window."""
+        try:
+            import win32gui
+        except ImportError:
+            return None
+        try:
+            hwnd = win32gui.WindowFromPoint((int(x), int(y)))
+            if not hwnd:
+                return None
+            root = win32gui.GetAncestor(hwnd, _GA_ROOT)
+            if not root or root == self._exclude_hwnd:
+                return None
+            return root
+        except Exception:
+            return None
+
+    @staticmethod
+    def _hwnd_process_title(hwnd) -> tuple[str | None, str | None]:
+        try:
+            import psutil
+            import win32gui
+            import win32process
+        except ImportError:
+            return None, None
+        try:
+            title = win32gui.GetWindowText(hwnd) or None
+        except Exception:
+            title = None
         try:
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
             proc = psutil.Process(pid).name()
@@ -179,9 +239,25 @@ class ActivityLogger(QtCore.QObject):
         proc = self._procs.most_common(1)[0][0] if self._procs else None
         title = self._titles.most_common(1)[0][0] if self._titles else None
 
+        # Looked-at window: modal HWND of the interval, resolved once. NULL
+        # when off-screen / not tracking (no HWND was accumulated).
+        gazed_proc = gazed_title = None
+        if self._gazed_hwnds:
+            gazed_hwnd = self._gazed_hwnds.most_common(1)[0][0]
+            gazed_proc, gazed_title = self._hwnd_process_title(gazed_hwnd)
+            if self._no_titles:
+                gazed_title = None
+
         self._db.insert_sample(
             self._session, zone, on_frac, state, face_frac, proc, title,
-            kb, mouse)
+            kb, mouse, gazed_process=gazed_proc,
+            gazed_window_title=gazed_title)
+
+        # Hand the interval to the event detector (2B.1).
+        from overlay.event_detector import IntervalSummary
+        self.intervalLogged.emit(IntervalSummary(
+            on_screen=on_frac >= 0.5, face_present=face_frac >= 0.5,
+            active=(kb + mouse) > 0, valid=frames > 0))
         self._reset_accumulators()
 
     # --- control -----------------------------------------------------------

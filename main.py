@@ -42,6 +42,9 @@ class GazePipeline:
             disable_auto_exposure=not args.keep_auto_exposure)
         self.tracker = HeadTracker()
         self.estimator = EthXGazeEstimator(device=args.device)
+        # Most recent BGR frame, kept so the 2B.1 event snapshots can reuse an
+        # already-captured frame at zero extra camera cost.
+        self.last_frame = None
 
     def open(self) -> "GazePipeline":
         self.camera.open()
@@ -72,6 +75,7 @@ class GazePipeline:
         frame = self.camera.read()
         if frame is None:
             return "no_frame", None, None
+        self.last_frame = frame
         obs = self.tracker.process(frame)
         if obs is None:
             return "no_face", None, None
@@ -280,7 +284,17 @@ def cmd_record_background(args: argparse.Namespace) -> int:
     _trace_calibration(Path(args.calibration))
     screen = get_screen_size()
     print(f"screen: {screen[0]}x{screen[1]} px (detected)")
-    cfg = resolve_overlay({})   # overlay.yaml or defaults; no per-run overrides
+    cfg = resolve_overlay({
+        "snapshots_enabled": True if args.snapshots else None,
+        "snapshot_burst": args.snapshot_burst,
+        "snapshot_retention_days": args.snapshot_retention,
+        "off_screen_sustained_s": args.off_screen_s,
+        "face_absent_s": args.face_absent_s,
+        "distraction_return_min": args.distraction_min,
+        "focus_block_min": args.focus_block_min,
+        "alarm_enabled": True if args.alarm else None,
+        "alarm_off_screen_min": args.alarm_off_screen_min,
+    })
     db_path = Path(args.db) if args.db else (DATA_DIR / "activity.db")
     app = OverlayApp(
         pipeline_factory=lambda: GazePipeline(args),
@@ -421,6 +435,51 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     return 0 if report is not None else 1
 
 
+def cmd_autostart(args: argparse.Namespace) -> int:
+    """Register/remove a Windows logon Scheduled Task that starts the recorder
+    (hidden, via pythonw) at user logon. The tray is the runtime control."""
+    import subprocess
+
+    task = "gazetrack recorder"
+    pythonw = PROJECT_ROOT / ".venv" / "Scripts" / "pythonw.exe"
+    tr = f'"{pythonw}" "{PROJECT_ROOT / "main.py"}" record --background'
+
+    if args.enable:
+        shown = (f'schtasks /Create /TN "{task}" /TR "{tr}" '
+                 "/SC ONLOGON /RL LIMITED /F")
+        print("Registering Windows logon task:\n  " + shown)
+        r = subprocess.run(
+            ["schtasks", "/Create", "/TN", task, "/TR", tr, "/SC", "ONLOGON",
+             "/RL", "LIMITED", "/F"], capture_output=True, text=True)
+        out = (r.stdout or r.stderr).strip()
+        print(out)
+        if r.returncode == 0:
+            print("Done. The recorder starts hidden at your next logon; "
+                  "control it from the tray (Salir to stop).")
+        elif "denied" in out.lower() or "denegado" in out.lower():
+            print("Access denied: this system requires an elevated prompt to "
+                  "register a logon task. Open Command Prompt as administrator "
+                  "and run the command shown above (or 'python main.py "
+                  "autostart --enable' from there).")
+        return r.returncode
+
+    if args.disable:
+        r = subprocess.run(["schtasks", "/Delete", "/TN", task, "/F"],
+                           capture_output=True, text=True)
+        print((r.stdout or r.stderr).strip())
+        return r.returncode
+
+    # default: status
+    r = subprocess.run(["schtasks", "/Query", "/TN", task, "/FO", "LIST"],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        print("autostart: ENABLED\n" + r.stdout.strip())
+    else:
+        print("autostart: not registered.\n"
+              "Enable with: python main.py autostart --enable")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gazetrack",
@@ -546,7 +605,38 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run without a system-tray icon")
     p.add_argument("--exit-after", type=float, default=None,
                    help="auto-quit after N seconds (measurement/testing)")
+    # 2B.1 events + snapshots (events always logged; images opt-in).
+    p.add_argument("--snapshots", action="store_true",
+                   help="opt in to saving a face frame on events (local only)")
+    p.add_argument("--snapshot-burst", type=int, default=None,
+                   help="frames saved per event: 1 or 3 (default: 1)")
+    p.add_argument("--snapshot-retention", type=int, default=None,
+                   help="days to keep snapshot folders (default: 14)")
+    p.add_argument("--off-screen-s", type=int, default=None,
+                   help="OFF_SCREEN_SUSTAINED threshold in s (default: 30)")
+    p.add_argument("--face-absent-s", type=int, default=None,
+                   help="FACE_ABSENT threshold in s (default: 60)")
+    p.add_argument("--distraction-min", type=float, default=None,
+                   help="min distraction before DISTRACTION_RETURN (default: 5)")
+    p.add_argument("--focus-block-min", type=float, default=None,
+                   help="continuous focus for FOCUS_BLOCK_START (default: 15)")
+    p.add_argument("--alarm", action="store_true",
+                   help="toast after sustained off-screen time (2C alarm)")
+    p.add_argument("--alarm-off-screen-min", type=float, default=None,
+                   help="off-screen minutes before the alarm (default: 10)")
     p.set_defaults(func=cmd_record)
+
+    p = sub.add_parser("autostart",
+                       help="register/remove a Windows logon task that starts "
+                            "the recorder")
+    grp = p.add_mutually_exclusive_group()
+    grp.add_argument("--enable", action="store_true",
+                     help="register the logon task")
+    grp.add_argument("--disable", action="store_true",
+                     help="remove the logon task")
+    grp.add_argument("--status", action="store_true",
+                     help="show task status (default)")
+    p.set_defaults(func=cmd_autostart)
 
     p = sub.add_parser("evaluate",
                        help="5x5 grid accuracy report (angular and cm, "

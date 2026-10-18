@@ -105,6 +105,7 @@ class GazeWorker(QtCore.QThread):
         self._yaw_lo, self._yaw_hi = yaw_range
         self._pitch_lo, self._pitch_hi = pitch_range
         self._running = True
+        self._pipeline = None       # set in run(); exposes the last frame
 
     def set_domain(self, pose_margin_deg: float,
                    offscreen_margin: float) -> None:
@@ -142,9 +143,14 @@ class GazeWorker(QtCore.QThread):
         except Exception:
             return False
 
+    def get_last_frame(self):
+        """Most recent BGR frame (for opt-in event snapshots), or None."""
+        return getattr(self._pipeline, "last_frame", None)
+
     def run(self) -> None:
         from mapping.calibrator import make_features
         pipeline = self._pipeline_factory()
+        self._pipeline = pipeline
         try:
             pipeline.open()
         except Exception as exc:
@@ -416,22 +422,44 @@ class OverlayApp:
         # 2B behavior logging (optional consumer of the same worker).
         self._db = None
         self._logger = None
+        self._detector = None
+        self._session_id = None
+        self._snapshots_dir = None
         if enable_logging:
-            from overlay.activity_db import ActivityDB
+            from overlay.activity_db import INTERVAL_SECONDS, ActivityDB
             from overlay.activity_logger import ActivityLogger
+            from overlay.event_detector import EventDetector
             self._db = ActivityDB(db_path)
-            sid = self._db.start_session(
+            self._snapshots_dir = self._db.path.parent / "snapshots"
+            purged = self._db.enforce_retention(config.snapshot_retention_days,
+                                                self._snapshots_dir)
+            self._session_id = self._db.start_session(
                 notes="overlay hidden" if start_hidden else "overlay visible")
             self._logger = ActivityLogger(
-                self._db, sid, screen_size, config.grid_cols, config.grid_rows,
-                no_titles)
+                self._db, self._session_id, screen_size, config.grid_cols,
+                config.grid_rows, no_titles)
             self.worker.sampled.connect(self._logger.on_sample)
+            self._detector = EventDetector(
+                INTERVAL_SECONDS, config.off_screen_sustained_s,
+                config.face_absent_s, config.distraction_return_min,
+                config.focus_block_min)
+            self._logger.intervalLogged.connect(self._detector.on_interval)
+            self._detector.eventDetected.connect(self._on_event)
+            # Productivity alarm: a second consumer of the interval stream.
+            self._interval_s = INTERVAL_SECONDS
+            self._alarm_off = 0
+            self._alarm_fired = False
+            self._logger.intervalLogged.connect(self._on_alarm_interval)
             est = self._db.estimate_size_per_day()
             print(f"logging            : {self._db.path} (SQLite WAL), grid "
                   f"{config.grid_cols}x{config.grid_rows}, window titles "
                   f"{'OFF (--no-titles)' if no_titles else 'on'}")
             print(f"est. DB size       : ~{est['mb_per_day']} MB/day of use "
                   "(5 s intervals)")
+            print(f"snapshots          : "
+                  f"{'ON' if config.snapshots_enabled else 'OFF (opt-in)'}, "
+                  f"retention {config.snapshot_retention_days} d"
+                  + (f", purged {purged} old folder(s)" if purged else ""))
         if start_hidden:
             self.window.set_shown(False)
 
@@ -464,7 +492,73 @@ class OverlayApp:
         self.smoother.set_params(cfg.min_cutoff, cfg.beta)
         if self._logger is not None:
             self._logger.set_grid(cfg.grid_cols, cfg.grid_rows)
+        if self._detector is not None:
+            self._detector.set_thresholds(
+                cfg.off_screen_sustained_s, cfg.face_absent_s,
+                cfg.distraction_return_min, cfg.focus_block_min)
         self._save_timer.start(400)   # debounce disk writes during a drag
+
+    def _on_event(self, event_type: str, duration_s: float) -> None:
+        """Log a behavioral event (always) and, only if snapshots are opted
+        in, save a face frame already captured by the camera."""
+        snap = None
+        if self.config.snapshots_enabled:
+            snap = self._save_snapshot(event_type, 0)
+            for i in range(1, max(1, self.config.snapshot_burst)):
+                QtCore.QTimer.singleShot(
+                    i * 1000,
+                    lambda et=event_type, k=i: self._save_snapshot(et, k))
+        self._db.insert_event(self._session_id, event_type, snap, duration_s)
+        print(f"event: {event_type} ({duration_s:.0f}s)"
+              + (f" -> {snap}" if snap else ""), flush=True)
+
+    def _on_alarm_interval(self, summary) -> None:
+        """Sober toast after a sustained off-screen stretch (2C minimal
+        alarm). Off-screen is the recorder's native signal; a distraction-app
+        alarm would need the dashboard's categories and is a follow-up."""
+        if not summary.valid:
+            return
+        if summary.on_screen:
+            self._alarm_off = 0
+            self._alarm_fired = False
+            return
+        if not self.config.alarm_enabled:
+            return
+        self._alarm_off += 1
+        threshold = self.config.alarm_off_screen_min * 60 / self._interval_s
+        if self._alarm_off >= threshold and not self._alarm_fired:
+            self._alarm_fired = True
+            self._show_alarm(
+                f"Llevas {self.config.alarm_off_screen_min:g} min fuera de "
+                "pantalla de forma continua.")
+
+    def _show_alarm(self, message: str) -> None:
+        if self._tray is not None:
+            self._tray.showMessage(
+                "gazetrack", message,
+                QtWidgets.QSystemTrayIcon.MessageIcon.Information, 6000)
+        else:
+            print(f"alarm: {message}", flush=True)
+
+    def _save_snapshot(self, event_type: str, index: int):
+        """Write the worker's last frame to data/snapshots/YYYY-MM-DD/. Returns
+        the path relative to the data dir, or None. Images stay on this
+        machine and are purged by the retention policy."""
+        frame = self.worker.get_last_frame()
+        if frame is None:
+            return None
+        import datetime as _dt
+
+        import cv2
+        now = _dt.datetime.now()
+        folder = self._snapshots_dir / now.strftime("%Y-%m-%d")
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{event_type}_{now.strftime('%H%M%S')}_{index}.jpg"
+        try:
+            cv2.imwrite(str(path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        except Exception:
+            return None
+        return str(path.relative_to(self._db.path.parent)).replace("\\", "/")
 
     def show_settings(self) -> None:
         from overlay.settings_dialog import SettingsDialog
@@ -571,7 +665,12 @@ class OverlayApp:
 
     def run(self, exit_after: float | None = None) -> int:
         self.window.show()
-        applied = apply_click_through(int(self.window.winId()))
+        hwnd = int(self.window.winId())
+        applied = apply_click_through(hwnd)
+        # Exclude our own window from the gaze->window mapping now that it has
+        # a native HWND (it is click-through, so this is a safety net).
+        if getattr(self, "_logger", None) is not None:
+            self._logger.set_exclude_hwnd(hwnd)
         print(f"click-through      : "
               f"{'win32 (layered/transparent/noactivate)' if applied else 'Qt WindowTransparentForInput only'}")
         self.worker.start()

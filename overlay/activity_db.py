@@ -19,12 +19,25 @@ from pathlib import Path
 INTERVAL_SECONDS = 5
 _CHECKPOINT_EVERY = 60          # passive WAL checkpoint cadence (intervals)
 
+# Schema version (PRAGMA user_version). Bumped when the on-disk shape changes;
+# _migrate() applies the delta so existing databases upgrade in place.
+#   1 -> original 2B/2B.1 schema
+#   2 -> add samples.gazed_process / samples.gazed_window_title (looked-at
+#        window per interval; distinct from the active/foreground window)
+SCHEMA_VERSION = 2
+
 # Per-sample tracking states.
 STATE_OK = "ok"
 STATE_FACE_LOST = "face_lost"
 STATE_POSE_EXTREME = "pose_extreme"
 STATE_OFFSCREEN = "offscreen"
 STATE_CAMERA_LOST = "camera_lost"
+
+# 2B.1 event types (always logged as metrics; the snapshot image is opt-in).
+EVENT_OFF_SCREEN_SUSTAINED = "off_screen_sustained"
+EVENT_FACE_ABSENT = "face_absent"
+EVENT_DISTRACTION_RETURN = "distraction_return"
+EVENT_FOCUS_BLOCK_START = "focus_block_start"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -44,15 +57,31 @@ CREATE TABLE IF NOT EXISTS samples (
     window_title   TEXT,      -- modal title, or NULL under --no-titles
     kb_events      INTEGER,   -- key PRESS count this interval (no content)
     mouse_events   INTEGER,   -- mouse click/scroll/throttled-move count
+    gazed_process       TEXT, -- modal process of the window UNDER the gaze
+                              -- point (what the user LOOKED at); NULL when
+                              -- off-screen / not tracking
+    gazed_window_title  TEXT, -- modal looked-at title, NULL under --no-titles
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+CREATE TABLE IF NOT EXISTS events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            TEXT NOT NULL,
+    session_id    INTEGER,
+    event_type    TEXT NOT NULL,   -- EVENT_* above
+    snapshot_path TEXT,            -- relative JPEG path, or NULL (opt-in off)
+    duration_s    REAL,            -- length of the state that triggered it
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
 CREATE INDEX IF NOT EXISTS idx_samples_session ON samples(session_id);
+CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 """
 
 
 def _now_iso() -> str:
-    return _dt.datetime.now().isoformat(timespec="seconds")
+    """UTC timestamp with a Z suffix. Stored in UTC so the data is robust to
+    timezone/DST; the dashboard converts to the local zone for display."""
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class ActivityDB:
@@ -66,8 +95,25 @@ class ActivityDB:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._recover_open_sessions()
         self._writes = 0
+
+    def _migrate(self) -> None:
+        """Bring an existing database up to SCHEMA_VERSION. Additive only:
+        new columns are added with ALTER TABLE, so rows written by an older
+        version keep their data and read back NULL for the new columns."""
+        version = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        if version >= SCHEMA_VERSION:
+            return
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(samples)")}
+        if "gazed_process" not in cols:
+            self._conn.execute(
+                "ALTER TABLE samples ADD COLUMN gazed_process TEXT")
+        if "gazed_window_title" not in cols:
+            self._conn.execute(
+                "ALTER TABLE samples ADD COLUMN gazed_window_title TEXT")
+        self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _recover_open_sessions(self) -> None:
         """Close any session left open by a previous hard kill, dating its end
@@ -96,19 +142,58 @@ class ActivityDB:
                       tracking_state: str, face_present: float,
                       process: str | None, window_title: str | None,
                       kb_events: int, mouse_events: int,
+                      gazed_process: str | None = None,
+                      gazed_window_title: str | None = None,
                       ts: str | None = None) -> None:
         self._conn.execute(
             "INSERT INTO samples(ts, session_id, gaze_zone, on_screen, "
             "tracking_state, face_present, process, window_title, kb_events, "
-            "mouse_events) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "mouse_events, gazed_process, gazed_window_title) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (ts or _now_iso(), session_id, gaze_zone, round(on_screen, 3),
              tracking_state, round(face_present, 3), process, window_title,
-             int(kb_events), int(mouse_events)))
+             int(kb_events), int(mouse_events),
+             gazed_process, gazed_window_title))
         # isolation_level=None => each statement autocommits, so a hard kill
         # never loses a written interval. Periodically fold the WAL back.
         self._writes += 1
         if self._writes % _CHECKPOINT_EVERY == 0:
             self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+
+    def insert_event(self, session_id: int, event_type: str,
+                     snapshot_path: str | None, duration_s: float,
+                     ts: str | None = None) -> int:
+        cur = self._conn.execute(
+            "INSERT INTO events(ts, session_id, event_type, snapshot_path, "
+            "duration_s) VALUES(?,?,?,?,?)",
+            (ts or _now_iso(), session_id, event_type, snapshot_path,
+             round(float(duration_s), 1)))
+        return int(cur.lastrowid)
+
+    def enforce_retention(self, days: int, snapshots_dir: Path) -> int:
+        """Delete snapshot image folders older than `days` and NULL the
+        snapshot_path of their events (the event METRIC row is kept; only the
+        opt-in image is removed). Returns the number of folders deleted."""
+        import shutil
+        snapshots_dir = Path(snapshots_dir)
+        if not snapshots_dir.exists():
+            return 0
+        cutoff = (_dt.date.today() - _dt.timedelta(days=days))
+        deleted = 0
+        for folder in snapshots_dir.iterdir():
+            if not folder.is_dir():
+                continue
+            try:
+                folder_date = _dt.date.fromisoformat(folder.name)
+            except ValueError:
+                continue
+            if folder_date < cutoff:
+                shutil.rmtree(folder, ignore_errors=True)
+                self._conn.execute(
+                    "UPDATE events SET snapshot_path=NULL WHERE "
+                    "snapshot_path LIKE ?", (f"%{folder.name}%",))
+                deleted += 1
+        return deleted
 
     def estimate_size_per_day(self) -> dict:
         """Extrapolate on-disk bytes/day from the current rows, plus an
@@ -181,6 +266,31 @@ SAMPLE_QUERIES: dict[str, str] = {
         WHERE process IS NOT NULL
         GROUP BY process
         ORDER BY (SUM(kb_events) + SUM(mouse_events)) DESC
+        LIMIT 15;
+    """,
+    "time_per_gazed_app": """
+        -- Minutes spent LOOKING at each app (the window under the gaze),
+        -- independent of which window was active/foreground.
+        SELECT gazed_process,
+               ROUND(COUNT(*) * :iv / 60.0, 1) AS minutes
+        FROM samples
+        WHERE gazed_process IS NOT NULL
+        GROUP BY gazed_process
+        ORDER BY minutes DESC
+        LIMIT 15;
+    """,
+    "gazed_vs_active": """
+        -- Intervals where the looked-at window differs from the active one:
+        -- the gap between where focus is and where the keyboard is.
+        SELECT process        AS active_process,
+               gazed_process   AS looked_process,
+               ROUND(COUNT(*) * :iv / 60.0, 1) AS minutes
+        FROM samples
+        WHERE gazed_process IS NOT NULL
+          AND process IS NOT NULL
+          AND gazed_process <> process
+        GROUP BY process, gazed_process
+        ORDER BY minutes DESC
         LIMIT 15;
     """,
 }
